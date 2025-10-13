@@ -1,0 +1,12 @@
+services:
+  telegram-parsing-gifts:
+    image: telegram-parsing-gifts:latest
+    build: .
+    restart: "no"
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
