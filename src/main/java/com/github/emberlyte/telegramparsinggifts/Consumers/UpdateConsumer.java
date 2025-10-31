@@ -1,6 +1,8 @@
 package com.github.emberlyte.telegramparsinggifts.Consumers;
 
+import com.github.emberlyte.telegramparsinggifts.Models.Notification;
 import com.github.emberlyte.telegramparsinggifts.Services.JsonParsingService;
+import com.github.emberlyte.telegramparsinggifts.Services.RedisGiftService;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -11,6 +13,7 @@ import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.generics.TelegramClient;
 
+import java.util.List;
 import java.util.Objects;
 
 @Service
@@ -22,10 +25,14 @@ public class UpdateConsumer implements LongPollingSingleThreadUpdateConsumer {
 
     private final TelegramClient telegramClient;
     private final JsonParsingService jsonParsingService;
+    private final RedisGiftService redisGiftService;
 
-    public UpdateConsumer(@Value("${TELEGRAM_BOT_TOKEN}") String token, JsonParsingService jsonParsingService) {
+    public UpdateConsumer(@Value("${TELEGRAM_BOT_TOKEN}") String token,
+                          JsonParsingService jsonParsingService,
+                          RedisGiftService redisGiftService) {
         this.telegramClient = new OkHttpTelegramClient(token);
         this.jsonParsingService = jsonParsingService;
+        this.redisGiftService = redisGiftService;
     }
 
     @Override
@@ -44,22 +51,41 @@ public class UpdateConsumer implements LongPollingSingleThreadUpdateConsumer {
             return;
         }
 
-        if ("/start".equals(text)) {
-            String jsonMessage = jsonParsingService.parsingJson();
-
-            if (jsonMessage != null && !jsonMessage.isEmpty()) {
-                sendMessage(jsonMessage, chatId);
-            } else {
-                sendMessage("Не удалось получить информацию о подарках или доступные подарки отсутствуют.", chatId);
-            }
+        if (text.equals("/start")) {
+            String message = jsonParsingService.getAvailableGiftsMessage();
+            sendMessage(message, chatId);
         }
     }
 
-    @Scheduled(fixedRate = 300)
-    private void sendNewGiftMessage() {
-        String message = jsonParsingService.parsingJson();
-        if (message != null && !message.isEmpty()) {
-            sendMessage(message, mainChatId);
+    // Парсинг каждые 5 минут (300000 мс)
+    @Scheduled(fixedRate = 1000)
+    private void scheduledParsing() {
+        log.info("Запуск scheduled парсинга...");
+        jsonParsingService.parsingAndSaveGifts();
+    }
+
+    // Отправка уведомлений каждые 10 секунд
+    @Scheduled(fixedRate = 10000)
+    private void sendPendingNotifications() {
+        List<Notification> notifications = redisGiftService.getUnsentNotifications();
+
+        if (notifications.isEmpty()) {
+            return;
+        }
+
+        log.info("Найдено {} неотправленных уведомлений", notifications.size());
+
+        for (Notification notification : notifications) {
+            try {
+                sendMessage(notification.getMessage(), mainChatId);
+                redisGiftService.markNotificationAsSent(notification.getId());
+                log.info("Уведомление отправлено: {}", notification.getMessage());
+
+                // Небольшая задержка между сообщениями
+                Thread.sleep(500);
+            } catch (Exception e) {
+                log.error("Ошибка отправки уведомления: ", e);
+            }
         }
     }
 
@@ -82,7 +108,7 @@ public class UpdateConsumer implements LongPollingSingleThreadUpdateConsumer {
         try {
             telegramClient.execute(message);
         } catch (Exception e) {
-            log.error("Error while send message", e);
+            log.error("Ошибка отправки сообщения", e);
         }
     }
 }

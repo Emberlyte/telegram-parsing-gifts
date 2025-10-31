@@ -26,6 +26,9 @@ public class ApiResponse {
 
         @SerializedName("remaining_count")
         private Integer remainingCount;
+
+        @SerializedName("total_count")
+        private Integer totalCount;
     }
 
     @Data
